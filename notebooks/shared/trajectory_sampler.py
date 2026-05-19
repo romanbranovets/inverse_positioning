@@ -1,17 +1,8 @@
 import math
-
 import torch
 
-from .magentic_field import (
-    B,
-    DEVICE,
-    DTYPE,
-    STEP_METERS,
-    exp_map_sphere,
-    normalize,
-    sample_uniform_sphere,
-    tangent_basis,
-)
+from .sphere_utils import *
+from .magentic_field import *
 
 EPS_B_STD = 0.003
 EPS_U_STD = 0.0001
@@ -20,10 +11,21 @@ MIN_STEPS = 1
 MAX_STEPS = 16
 WALK_DIRECTION_RANDOMNESS = 0.45
 
+STEP_METERS = 32.0
+STEP_RAD = STEP_METERS / EARTH_RADIUS_M
+
 # B(3), dB(3), outgoing du meters(2), cumulative du meters(2),
 # time/timestep phase(3), final flag(1).
 FEATURE_DIM = 14
 FEATURE_NORM_SAMPLES = 8192
+
+
+def exp_map_sphere(u, tangent_step_meters):
+    step_meters = tangent_step_meters.norm(dim=-1, keepdim=True)
+    theta = step_meters / EARTH_RADIUS_M
+    direction = tangent_step_meters / step_meters.clamp_min(1e-8)
+    moved = torch.cos(theta) * u + torch.sin(theta) * direction
+    return normalize(moved)
 
 
 def make_trajectories(batch_size, step_counts=None, device=DEVICE, return_path=False):
@@ -144,4 +146,3 @@ def estimate_feature_normalization(samples=FEATURE_NORM_SAMPLES, device=DEVICE):
     feature_mean = valid.mean(dim=0)
     feature_std = valid.std(dim=0).clamp_min(1e-4)
     return feature_mean, feature_std
-
