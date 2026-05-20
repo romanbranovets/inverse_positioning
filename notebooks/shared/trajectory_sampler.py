@@ -11,7 +11,7 @@ MIN_STEPS = 1
 MAX_STEPS = 16
 WALK_DIRECTION_RANDOMNESS = 0.45
 
-STEP_METERS = 32.0
+STEP_METERS = 100.0
 STEP_RAD = STEP_METERS / EARTH_RADIUS_M
 
 # B(3), dB(3), outgoing du meters(2), cumulative du meters(2),

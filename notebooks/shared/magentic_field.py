@@ -42,13 +42,30 @@ WAVE_DIRS = normalize(
         dtype=DTYPE,
     )
 )
+# The field is deliberately not a random fingerprint at a single point.
+# A weak coarse component gives about city-scale localization from one
+# magnetic sample, while aliased kilometer-scale waves are resolved gradually
+# as the trajectory observes how the field changes along the walk.
 FIELD_FEATURE_SCALES_M = torch.tensor(
-    [120_000.0, 60_000.0, 24_000.0, 12_000.0, 6_000.0, 3_000.0, 1_500.0, 750.0],
+    [
+        180_000.0,
+        90_000.0,
+        45_000.0,
+        22_000.0,
+        11_000.0,
+        5_500.0,
+        2_800.0,
+        1_400.0,
+    ],
     dtype=DTYPE,
 )
 FIELD_FEATURE_WEIGHTS = torch.tensor(
-    [0.08, 0.075, 0.065, 0.055, 0.045, 0.035, 0.027, 0.020], dtype=DTYPE
+    [0.0045, 0.0055, 0.0065, 0.0075, 0.0085, 0.0090, 0.0080, 0.0060],
+    dtype=DTYPE,
 )
+COARSE_FIELD_GAIN = 0.038
+DIPOLE_FIELD_GAIN = 0.0035
+TEXTURE_FIELD_GAIN = 1.0
 
 
 def B(u):
@@ -81,8 +98,9 @@ def B(u):
         fine[:, 1] = fine[:, 1] + weight * torch.cos(p1 + 0.53 * j)
         fine[:, 2] = fine[:, 2] + weight * torch.sin(p2 - 0.29 * j)
 
-    # A weak radial backbone keeps the problem globally grounded, while the
-    # kilometer-scale texture makes longer trajectories much more informative
-    # than a single local magnetic sample.
-    field = 0.22 * flat + 0.020 * dipole_field + 0.55 * fine
+    field = (
+        COARSE_FIELD_GAIN * flat
+        + DIPOLE_FIELD_GAIN * dipole_field
+        + TEXTURE_FIELD_GAIN * fine
+    )
     return field.reshape(shape)
