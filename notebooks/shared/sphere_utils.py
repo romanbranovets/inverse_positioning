@@ -36,50 +36,5 @@ def fibonacci_sphere(n, device=DEVICE):
 
 
 def equal_area_sphere_grid(n, device=DEVICE):
-    """Deterministic equal-area ring grid with exactly n unit-sphere points."""
-    if n <= 0:
-        return torch.empty(0, 3, device=device, dtype=DTYPE)
-
-    ring_count = max(1, int(round(0.72 * math.sqrt(n))))
-    ring_index = torch.arange(ring_count, dtype=torch.float64)
-    z = 1.0 - 2.0 * (ring_index + 0.5) / ring_count
-    radius = torch.sqrt((1.0 - z * z).clamp_min(0.0))
-    ideal = radius / radius.sum() * n
-    counts = torch.floor(ideal).clamp_min(1).to(torch.long)
-
-    diff = int(n - counts.sum().item())
-    if diff > 0:
-        order = torch.argsort(ideal - counts.to(torch.float64), descending=True)
-        for idx in order[:diff]:
-            counts[idx] += 1
-    elif diff < 0:
-        removable = counts > 1
-        order = torch.argsort(counts.to(torch.float64) - ideal, descending=True)
-        removed = 0
-        for idx in order:
-            if removable[idx]:
-                counts[idx] -= 1
-                removed += 1
-                if removed == -diff:
-                    break
-
-    points = []
-    golden_fraction = (math.sqrt(5.0) - 1.0) / 2.0
-    for r_idx, count in enumerate(counts.tolist()):
-        offset = (r_idx * golden_fraction) % 1.0
-        k = torch.arange(count, dtype=DTYPE)
-        phi = 2.0 * math.pi * (k + offset) / count
-        z_value = torch.full((count,), float(z[r_idx]), dtype=DTYPE)
-        radius_value = torch.sqrt((1.0 - z_value * z_value).clamp_min(0.0))
-        points.append(
-            torch.stack(
-                [
-                    radius_value * torch.cos(phi),
-                    radius_value * torch.sin(phi),
-                    z_value,
-                ],
-                dim=-1,
-            )
-        )
-
-    return torch.cat(points, dim=0).to(device=device)
+    """Deterministic uniform-area, roughly equally spaced sphere grid."""
+    return fibonacci_sphere(n, device=device)
