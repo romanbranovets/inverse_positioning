@@ -229,7 +229,7 @@ class LightweightEnergyScorer(nn.Module):
             nn.GELU(),
             nn.Linear(d_model // 2, 1),
         )
-        self.energy_scale = nn.Parameter(torch.tensor(2.5))
+        self.energy_scale = nn.Parameter(torch.tensor(1.0))
 
         self.head = nn.Sequential(
             nn.LayerNorm(d_model),
@@ -244,7 +244,10 @@ class LightweightEnergyScorer(nn.Module):
             nn.Linear(d_model, 1),
         )
         self.bilinear = nn.Linear(d_model, 3, bias=False)
-        self.bilinear_scale = nn.Parameter(torch.tensor(12.0))
+        self.bilinear_scale = nn.Parameter(torch.tensor(6.0))
+        self.logit_clamp = 18.0
+        nn.init.zeros_(self.head[-1].weight)
+        nn.init.zeros_(self.head[-1].bias)
 
     def forward(self, ctx, endpoint, observed_tokens, pad_mask):
         endpoint_h = self.endpoint_proj(endpoint_descriptor(ctx.refined_mu, endpoint))
@@ -273,16 +276,28 @@ class LightweightEnergyScorer(nn.Module):
 
         mlp_logit = self.head(fused).squeeze(-1)
 
-        dot = (normalize(endpoint) * normalize(ctx.refined_mu)).sum(dim=-1)
-        align_gate = torch.sigmoid(12.0 * (dot - 0.86))
-        bilinear_logit = align_gate * self.bilinear_scale * (
-            self.bilinear(fused) * normalize(endpoint)
-        ).sum(dim=-1)
+        endpoint_u = normalize(endpoint)
+        refined_u = normalize(ctx.refined_mu)
+        dot = (endpoint_u * refined_u).sum(dim=-1)
+        align_gate = torch.sigmoid(10.0 * (dot - 0.88))
+        bilinear_core = (self.bilinear(fused) * endpoint_u).sum(dim=-1)
+        bilinear_logit = (
+            align_gate * self.bilinear_scale * torch.tanh(bilinear_core / 2.0)
+        )
 
-        physics_weight = F.softplus(self.ctx_physics(torch.cat([ctx.pooled, ctx.refined_mu], dim=-1))).squeeze(-1)
-        physics_bonus = -F.softplus(self.energy_scale) * physics_weight * physics_stats[:, 0]
+        physics_weight = F.softplus(
+            self.ctx_physics(torch.cat([ctx.pooled, ctx.refined_mu], dim=-1))
+        ).squeeze(-1)
+        mean_energy = physics_stats[:, 0].clamp(max=8.0)
+        physics_bonus = (
+            align_gate
+            * (-F.softplus(self.energy_scale))
+            * physics_weight
+            * mean_energy
+        )
 
-        return mlp_logit + bilinear_logit + physics_bonus
+        raw_logit = mlp_logit + bilinear_logit + physics_bonus
+        return raw_logit.clamp(-self.logit_clamp, self.logit_clamp)
 
 
 class AmortizedEnergyCritic(nn.Module):
@@ -383,6 +398,20 @@ class AmortizedEnergyCritic(nn.Module):
         )
 
 
+def hard_negative_fraction_for_epoch(
+    epoch,
+    warmup_epochs,
+    ramp_epochs,
+    target_fraction,
+):
+    if epoch <= warmup_epochs:
+        return 0.0
+    if ramp_epochs <= 0:
+        return target_fraction
+    progress = (epoch - warmup_epochs) / float(ramp_epochs)
+    return target_fraction * min(1.0, max(0.0, progress))
+
+
 def contrastive_logits(
     model,
     x,
@@ -428,7 +457,8 @@ def bounded_logits(logits, clamp_abs):
 def critic_nwj_training_nats(positive_logits, negative_logits, clamp_abs, exp_clamp):
     positive_t = bounded_logits(positive_logits, clamp_abs)
     negative_t = bounded_logits(negative_logits, clamp_abs)
-    negative_exp = torch.exp((negative_t - 1.0).clamp(max=exp_clamp))
+    log_penalty = (negative_t - 1.0).clamp(min=-exp_clamp, max=exp_clamp)
+    negative_exp = torch.exp(log_penalty)
     return positive_t.mean() - negative_exp.mean()
 
 
