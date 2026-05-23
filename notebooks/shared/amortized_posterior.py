@@ -9,7 +9,11 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from .ipe import TrajectoryEncoder, physics_consistency_loss, vmf_mixture_log_prob
+from .density_common import (
+    TrajectoryEncoder,
+    physics_consistency_loss,
+    vmf_mixture_log_prob,
+)
 from .sphere_utils import normalize, sample_uniform_sphere, tangent_basis
 
 
