@@ -297,6 +297,11 @@ def ap_training_loss(
     delta_weight=0.01,
 ):
     params, deltas = model.encode(x, pad_mask, return_deltas=True)
+    warmup = epoch <= nll_warmup_epochs
+    nwj_scale = 0.0 if warmup else min(1.0, (epoch - nll_warmup_epochs) / 20.0)
+    kappa_scale = 0.0 if warmup or epoch <= nll_warmup_epochs + 10 else 1.0
+    boost_scale = epoch > nll_warmup_epochs + 15
+
     density_nll = -model.density_log_prob(params, endpoint).mean()
     critic_nll = -model.critic_logit(
         params, endpoint, include_boost=boost_scale
@@ -310,11 +315,6 @@ def ap_training_loss(
         if deltas
         else torch.zeros((), device=x.device, dtype=x.dtype)
     )
-
-    warmup = epoch <= nll_warmup_epochs
-    nwj_scale = 0.0 if warmup else min(1.0, (epoch - nll_warmup_epochs) / 20.0)
-    kappa_scale = 0.0 if warmup or epoch <= nll_warmup_epochs + 10 else 1.0
-    boost_scale = epoch > nll_warmup_epochs + 15
 
     nwj = torch.tensor(0.0, device=x.device)
     positive_logit = model.critic_logit(params, endpoint, include_boost=boost_scale)
