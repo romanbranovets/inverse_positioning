@@ -65,6 +65,43 @@ def vmf_mixture_log_prob(endpoint, logits, mu, kappa):
     return torch.logsumexp(log_w + log_comp, dim=-1)
 
 
+class RefineBlock(nn.Module):
+    def __init__(self, d_model, n_heads=4, dropout=0.03, step_scale_m=250_000.0):
+        super().__init__()
+        self.step_scale_m = step_scale_m
+        self.endpoint_proj = nn.Linear(3, d_model)
+        self.residual_proj = nn.Linear(3, d_model)
+        self.query_norm = nn.LayerNorm(d_model)
+        self.cross_attn = nn.MultiheadAttention(
+            d_model, n_heads, dropout=dropout, batch_first=True
+        )
+        self.ff = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, 2 * d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(2 * d_model, 2),
+        )
+        nn.init.zeros_(self.ff[-1].weight)
+        nn.init.zeros_(self.ff[-1].bias)
+
+    def forward(self, endpoint, token_states, residual, pad_mask):
+        endpoint_emb = self.endpoint_proj(normalize(endpoint))
+        residual_emb = self.residual_proj(residual)
+        token_context = token_states + residual_emb
+        query = self.query_norm(endpoint_emb + token_context.mean(dim=1))
+        attended, _ = self.cross_attn(
+            query[:, None, :],
+            token_context,
+            token_context,
+            key_padding_mask=pad_mask,
+        )
+        delta_2d = self.step_scale_m * torch.tanh(self.ff(attended.squeeze(1)))
+        e1, e2 = tangent_basis(endpoint)
+        tangent = delta_2d[:, 0:1] * e1 + delta_2d[:, 1:2] * e2
+        return exp_map_sphere(endpoint, tangent), delta_2d
+
+
 class TrajectoryEncoder(nn.Module):
     def __init__(
         self,
